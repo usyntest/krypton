@@ -1,79 +1,65 @@
-import socket
-import ssl
+import tkinter
+import sys
+from url import URL
+
+WIDTH, HEIGHT = 800, 600
+HSTEP, VSTEP = 10, 18
+SCROLL_STEP = 100
 
 
-class URL:
-    def __init__(self, url):
-        self.scheme, url = url.split("://", 1)
-        assert self.scheme in ["http", "https", "file"]
+class Browser:
 
-        if self.scheme == "file":
-            self.host = None
-            self.path = url
-            self.port = None
-            return
+    def __init__(self):
+        self.window = tkinter.Tk()
+        self.canvas = tkinter.Canvas(
+            self.window,
+            width=WIDTH,
+            height=HEIGHT
+        )
+        self.canvas.pack()
+        self.scroll = 0
+        self.window.bind("<Down>", self.scrolldown)
+        self.window.bind("<Up>", self.scrollup)
+        self.display_list = []
 
-        if self.scheme == "http":
-            self.port = 80
-        else:
-            self.port = 443
+    def load(self, url):
+        body = url.request()
+        text = lex(body)
+        self.display_list = layout(text)
+        self.draw()
 
-        if "/" not in url:
-            url = url + "/"
+    def draw(self):
+        self.canvas.delete("all")
+        for x, y, c in self.display_list:
+            if y > self.scroll + HEIGHT:
+                continue
+            if y + VSTEP < self.scroll:
+                continue
+            self.canvas.create_text(x, y - self.scroll, text=c)
 
-        self.host, url = url.split("/", 1)
-        if ":" in self.host:
-            self.host, port = self.host.split(":", 1)
-            self.port = int(port)
-        self.path = "/" + url
+    def scrolldown(self, e):
+        self.scroll += SCROLL_STEP
+        self.draw()
 
-    def request(self, headers={}):
-
-        if self.scheme == "file":
-            with open(self.path, "r") as f:
-                return f.read()
-
-        s = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
-
-        headers = {}
-
-        if self.scheme == "https":
-            ctx = ssl.create_default_context()
-            s = ctx.wrap_socket(s, server_hostname=self.host)
-
-        s.connect((self.host, self.port))
-
-        request = f"GET {self.path} HTTP/1.0\r\n"
-        request += f"Host: {self.host}\r\n"
-        request += f"Connection: close\r\n"
-        request += f"User-Agent: Krypton\r\n"
-
-        for key in headers.keys():
-            request += f"{key}: {headers[key]}\r\n"
-        request += "\r\n"
-
-        s.send(request.encode('utf8'))
-
-        response = s.makefile("r", encoding="utf8", newline="\r\n")
-        statusline = response.readline()
-        version, status, explanation = statusline.split(" ", 2)
-
-        response_headers = {}
-        while True:
-            line = response.readline()
-            if line == "\r\n":
-                break
-            header, value = line.split(":", 1)
-            response_headers[header.casefold()] = value.strip()
-            assert "transfer-encoding" not in response_headers
-            assert "content-encoding" not in response_headers
-
-        content = response.read()
-        s.close()
-        return content
+    def scrollup(self, e):
+        self.scroll -= SCROLL_STEP
+        self.draw()
 
 
-def show(body):
+def layout(text):
+    display_list = []
+    cursor_x, cursor_y = HSTEP, VSTEP
+    for c in text:
+        if cursor_x >= WIDTH - HSTEP:
+            cursor_x = HSTEP
+            cursor_y += VSTEP
+        display_list.append((cursor_x, cursor_y, c))
+        cursor_x += HSTEP
+    return display_list
+
+
+def lex(body):
+    text = ""
     in_tag = False
     for c in body:
         if c == "<":
@@ -81,16 +67,16 @@ def show(body):
         elif c == ">":
             in_tag = False
         elif not in_tag:
-            print(c, end="")
-
-
-def load(url):
-    body = url.request()
-    show(body)
+            text += c
+    return text
 
 
 if __name__ == "__main__":
-    import sys
 
-    load(URL(sys.argv[1]))
-    load(URL(sys.argv[2]))
+    try:
+        url_ = URL(sys.argv[1])
+    except IndexError:
+        url_ = URL("file:///Users/uday/Development/github/krypton/default.html")
+
+    Browser().load(url_)
+    tkinter.mainloop()
